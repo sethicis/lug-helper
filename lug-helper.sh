@@ -2006,9 +2006,9 @@ maintenance_menu() {
         create_shortcut_msg="Create/Repair desktop shortcut"
 
         # Set the options to be displayed in the menu
-        menu_options=("$prefix_msg" "$launcher_msg" "$launchscript_msg" "$config_msg" "$controllers_msg" "$powershell_msg" "$dirs_msg" "$rsi_launcher_msg" "$create_shortcut_msg" "$reset_msg" "$quit_msg")
+        menu_options=("$prefix_msg" "$launcher_msg" "$launchscript_msg" "$config_msg" "$controllers_msg" "$powershell_msg" "$rsi_launcher_msg" "$dirs_msg" "$create_shortcut_msg" "$reset_msg" "$quit_msg")
         # Set the corresponding functions to be called for each of the options
-        menu_actions=("switch_prefix" "update_launcher" "edit_wine_launch_script" "call_launch_script config" "call_launch_script controllers" "install_powershell" "reinstall_rsi_launcher" "display_dirs" "create_desktop_files" "reset_helper" "menu_loop_done")
+        menu_actions=("switch_prefix" "update_launch_script" "edit_launch_script" "call_launch_script config" "call_launch_script controllers" "install_powershell" "reinstall_rsi_launcher" "display_dirs" "create_desktop_files" "reset_helper" "menu_loop_done")
 
         # Calculate the total height the menu should be
         # menu_option_height = pixels per menu option
@@ -2242,8 +2242,7 @@ reinstall_rsi_launcher() {
     download_rsi_installer
     # Abort if the download failed
     if [ "$?" -eq 1 ]; then
-        message error "Unable to install or update the RSI Launcher."
-        return 1
+        message error "Unable to install Star Citizen. Aborting."
     fi
 
     # Get the current wine runner from the launch script
@@ -2601,9 +2600,9 @@ install_dxvk_nvapi() {
 ######## end dxvk functions ################################################
 ############################################################################
 
-# MARK: install_game_wine()
+# MARK: install_game()
 # Install the game with Wine
-install_game_wine() {
+install_game() {
     # Check if the install script exists
     if [ ! -f "$wine_launch_script" ]; then
         message error "Game launch script not found! Unable to proceed.\n\n$wine_launch_script\n\nIt is included in our official releases here:\n$releases_url"
@@ -2650,12 +2649,6 @@ install_game_wine() {
                     continue
                 fi
 
-                # Make sure the directory is empty
-                if [ "$(ls -A "$install_dir" 2>/dev/null)" ]; then
-                    message warning "The chosen directory is not empty!\nPlease choose a different install location.\n\n$install_dir"
-                    continue
-                fi
-
                 # Add the wine prefix subdirectory to the install path
                 install_dir="$install_dir/star-citizen"
 
@@ -2696,7 +2689,7 @@ install_game_wine() {
 
     debug_print continue "Installing a custom wine runner..."
 
-    download_dirs=("wine" "$install_dir/runners")
+    download_dir="$install_dir/runners"
 
     # Install the default wine runner into the prefix
     download_wine
@@ -2730,7 +2723,7 @@ install_game_wine() {
     tmp_install_log="$(mktemp --suffix=".log" -t "lughelper-install-XXX")"
     debug_print continue "Installation log file created at $tmp_install_log"
 
-    # Create the new prefix and install powershell
+    # Configure the wine prefix environment
     export WINE="$wine_path/wine"
     export WINESERVER="$wine_path/wineserver"
     export WINEPREFIX="$install_dir"
@@ -2739,10 +2732,13 @@ install_game_wine() {
     # Show a zenity pulsating progress bar
     progress_bar start "Preparing Wine prefix and installing RSI Launcher. Please wait..."
 
+    # Create the new prefix and install powershell
     debug_print continue "Preparing Wine prefix. Please wait; this will take a moment..."
     "$winetricks_bin" -q arial tahoma dxvk powershell win11 >"$tmp_install_log" 2>&1
 
-    if [ "$?" -eq 1 ]; then
+    exit_code="$?"
+    if [ "$exit_code" -eq 1 ] || [ "$exit_code" -eq 130 ] || [ "$exit_code" -eq 126 ]; then
+        # 126 = permission denied (ie. noexec on /tmp)
         "$wine_path"/wineserver -k # Kill all wine processes
         progress_bar stop # Stop the zenity progress window
         if message question "Wine prefix creation failed. Aborting installation.\nThe install log was written to\n$tmp_install_log\n\nDo you want to delete\n${install_dir}?"; then
@@ -2775,7 +2771,6 @@ install_game_wine() {
     progress_bar stop
 
     # Kill the wine process after installation
-    # To prevent unexpected lingering background wine processes, it should be launched by the user attached to a terminal
     "$wine_path"/wineserver -k
 
     # Save the install location to the Helper's config files
